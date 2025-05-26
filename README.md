@@ -1,93 +1,297 @@
 # Bus Bunching Detection
 
+This module detects instances of bus bunching in a transit system and saves the results to CSV and JSON files. Bus bunching occurs when buses on the same route that are scheduled to be evenly spaced arrive close to each other at the same stop, causing irregular service intervals, longer wait times for passengers, and inefficient use of transit resources.
 
+## Overview
 
-## Getting started
+The bus bunching detection algorithm works by:
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+1. Fetching real-time bus position data with estimated arrival times
+2. Filtering buses that are within 3 minutes of arriving at the same stop on the same route
+3. Identifying groups of buses on the same route that are arriving too close to each other (bunched)
+4. Calculating the time differences between buses to determine if they are bunched
+5. Storing the bunching instances in a database to avoid duplicates
+6. Generating reports in CSV and JSON formats for analysis and visualization
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Requirements
 
-## Add your files
+- Python 3.7+
+- Required packages (install via `pip install -r requirements.txt`):
+  - pandas
+  - requests
+  - pytz
+  - geopy
+  - tqdm
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Configuration
 
+The module supports two methods of configuration:
+
+### 1. Environment Variables (.env file)
+
+For better security, you can store confidential API endpoints in a `.env` file. Copy the provided `.env.example` file to `.env` and update with your actual API endpoints:
+
+```env
+# API Endpoints
+BUS_POSITIONS_URL=https://api.example.com/v2/get_buses_next_stop_eta
+SCHEDULE_URL=https://gpsfeed.example.com/depot_tool_duty_master.txt
+FLEET_URL=https://depot.example.com/all_fleet/
+STOPS_URL=https://routesapi.example.com/transit/agency/get_stops
+ROUTES_URL=https://routesapi.example.com/transit/agency/get_routes
+
+# Settings
+TIMEZONE=Asia/Kolkata
+DISTANCE_THRESHOLD=300
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/transport-stack/bus-bunching-detection.git
-git branch -M main
-git push -uf origin main
+
+### 2. Configuration File (config.ini)
+
+Alternatively, the module can use a configuration file (`config.ini`). If the file doesn't exist, a default one will be created with example values.
+
+```ini
+[API]
+pis_url = https://pis.example.com/v2/get_buses_next_stop_eta
+schedule_url = https://gpsfeed.example.com/depot_tool_duty_master.txt
+fleet_url = https://depot.example.com/all_fleet/
+stops_url = https://routesapi.example.com/transit/agency/get_stops
+routes_url = https://routesapi.example.com/transit/agency/get_routes
+
+[SETTINGS]
+timezone = Asia/Kolkata
+distance_threshold = 300
 ```
 
-## Integrate with your tools
+**Note:** Environment variables take precedence over the config.ini file settings.
 
-- [ ] [Set up project integrations](https://gitlab.com/transport-stack/bus-bunching-detection/-/settings/integrations)
+## Expected API Response Structures
 
-## Collaborate with your team
+### 1. Bus Positions API
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+This API should return real-time bus positions with estimated time of arrival (ETA) information. Based on the code analysis, the endpoint URL format is:
 
-## Test and Deploy
+```text
+https://[your-domain]/api/get_buses_next_stop_eta
+```
 
-Use the built-in continuous integration in GitLab.
+Expected response format:
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+```json
+[
+  {
+    "vehicle_id": "DL1PC1234",
+    "route_id": "534",
+    "upcoming_stop_id": "1234",
+    "upcoming_stop_idx": 7,
+    "route_len": 15,
+    "timestamp": 1621234567,
+    "eta": 2,
+    "bus_lat": 40.7128,
+    "bus_lon": -74.0060,
+    "agency_id": "DIMTS"
+  },
+  {
+    "vehicle_id": "DL1PC5678",
+    "route_id": "534",
+    "upcoming_stop_id": "1234",
+    "upcoming_stop_idx": 7,
+    "route_len": 15,
+    "timestamp": 1621234567,
+    "eta": 2.5,
+    "bus_lat": 40.7130,
+    "bus_lon": -74.0062,
+    "agency_id": "DIMTS"
+  }
+]
+```
 
-***
+### 2. Stops API
 
-# Editing this README
+This API should return information about all stops in the system. Based on the code analysis, the endpoint URL format is:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```text
+https://[your-domain]/api/get_stops
+```
 
-## Suggestions for a good README
+Expected response format:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```json
+{
+  "description": "",
+  "message": "success",
+  "status": "success",
+  "stops": [
+    {
+      "id": 4,
+      "lat": 28.857683,
+      "lng": 77.097115,
+      "name": "Narela A-6 / CPJ College",
+      "next_stop": "State Bank Of Allahbad"
+    },
+    {
+      "id": 5,
+      "lat": 28.854725,
+      "lng": 77.097931,
+      "name": "State Bank Of Allahbad",
+      "next_stop": "Sec A-9 Narela"
+    },
+    {
+      "id": 8,
+      "lat": 28.848993,
+      "lng": 77.098488,
+      "name": "Narela Pocket 13 / A-6",
+      "next_stop": "Raja Harish Chandra Hospital"
+    },
+    {
+      "id": 10,
+      "lat": 28.837227,
+      "lng": 77.098579,
+      "name": "Kasturi Ram School",
+      "next_stop": "Munim Ji Ka Bagh"
+    }
+  ]
+}
+```
 
-## Name
-Choose a self-explaining name for your project.
+### 3. Routes API
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+This API should return information about all routes in the system. Based on the code analysis, the endpoint URL format is:
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```text
+https://[your-domain]/api/get_routes
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Expected response format:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```json
+{
+  "routes": [
+    {
+      "agency": "DTC",
+      "direction": 0,
+      "end": "ISBT Anand Vihar Terminal",
+      "id": 11021,
+      "long_name": "543STLDOWN",
+      "route": "543STL",
+      "short_name": "nan",
+      "start": "PG DAV College / Sri Niwaspuri",
+      "trips_count": 48
+    },
+    {
+      "agency": "DTC",
+      "direction": 1,
+      "end": "Sri Niwaspuri / PG DAV College Lajpat Nagar",
+      "id": 11020,
+      "long_name": "543STLUP",
+      "route": "543STL",
+      "short_name": "nan",
+      "start": "Anand Vihar ISBT Terminal",
+      "trips_count": 49
+    }
+  ]
+}
+```
+
+### 4. Schedule API
+
+This API should return a CSV file with schedule information. Based on the code analysis, the endpoint URL format is:
+
+```text
+https://[your-domain]/api/duty_master.txt
+```
+
+Expected CSV format:
+
+```csv
+Plate No.,Route No.,Trip Start Time,Trip End Time,Duty ID,Trip Number
+DL1PC1234,534,08:00:00,09:30:00,DT001,1
+DL1PC1234,534,09:45:00,11:15:00,DT001,2
+DL1PC5678,423,08:15:00,09:45:00,DT002,1
+```
+
+The code processes this CSV to extract:
+
+- Vehicle IDs (from 'Plate No.' column)
+- Route information (from 'Route No.' column)
+- Trip timing information (from 'Trip Start Time' and 'Trip End Time' columns)
+
+### 5. Fleet API
+
+This API should return a JSON array of objects with fleet information. Based on the code analysis, the endpoint URL format is:
+
+```text
+https://[your-domain]/api/all_fleet
+```
+
+Expected response format:
+
+```json
+[
+  {
+    "vehicle_id": "DL1PC1234",
+    "agency": "DIMTS",
+    "vehicle_type": "BUS",
+    "status": "ACTIVE"
+  },
+  {
+    "vehicle_id": "DL1PC5678",
+    "agency": "DIMTS",
+    "vehicle_type": "BUS",
+    "status": "ACTIVE"
+  }
+]
+```
+
+The code primarily uses the `vehicle_id` and `agency` fields from this response.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+1. Update the `config.ini` file with your API endpoints
+2. Run the script:
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```bash
+python bunching.py
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## Output
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+The script generates the following outputs:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+1. A SQLite database file: `bus_bunching/data/bus_bunching_YYYY-MM-DD.db`
+2. Intermediate CSV files:
+   - `bus_bunching/pis_df.csv`: All filtered bus positions
+   - `bus_bunching/final_bunching.csv`: Detected bunching instances
+3. A JSON file with bunching data: `bus_bunching/bunching_data.json`
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## Customization
+
+### Special Coordinates
+
+The `special_coordinates` list in the code contains locations where bunching detection should be ignored (e.g., bus terminals, depots). Replace the example coordinates with actual coordinates for your transit system.
+
+### Distance Threshold
+
+The distance threshold for filtering buses near special coordinates can be adjusted in the `config.ini` file under the `distance_threshold` setting (default: 300 meters).
+
+### Timezone
+
+The timezone used for timestamp conversion can be set in the `config.ini` file under the `timezone` setting (default: 'Asia/Kolkata').
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+This project is licensed under the Apache License, Version 2.0 - see below for details:
+
+```text
+Copyright 2025 Transport Stack
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
