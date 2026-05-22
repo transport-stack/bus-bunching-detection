@@ -1,0 +1,54 @@
+name: "Danger JS"
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  workflow_call:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  danger:
+    name: Danger JS Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write dangerfile
+        run: |
+          cat > dangerfile.js << 'INNEREOF'
+          const MAX_PR_LINE_COUNT = 500;
+
+          if (danger.github.pr.additions + danger.github.pr.deletions > MAX_PR_LINE_COUNT) {
+            warn(`Large PR (${danger.github.pr.additions + danger.github.pr.deletions} lines changed). Consider splitting into smaller PRs.`);
+          }
+
+          if (danger.github.pr.body.length < 20) {
+            warn("PR description is very short. Please add context: what does this change, why, and how was it tested?");
+          }
+
+          if (!danger.github.pr.body.toLowerCase().includes("changelog")) {
+            warn("No mention of a CHANGELOG update. If this change is user-facing, please add a CHANGELOG entry.");
+          }
+
+          if (!danger.github.pr.body.toLowerCase().includes("test")) {
+            warn("No mention of tests. Did you add or update tests for this change?");
+          }
+
+          const markdownOnly = danger.git.modified_files.every(f => f.endsWith(".md"));
+          if (markdownOnly && danger.git.modified_files.length > 0) {
+            markdown("All changes are in Markdown files. Markdown-only PRs are encouraged for documentation improvements.");
+          }
+          INNEREOF
+
+      - name: Danger JS
+        uses: danger/danger-js@12.3.4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: "--dangerfile dangerfile.js"
